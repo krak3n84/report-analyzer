@@ -1,56 +1,135 @@
-# Forward Power Report Analyzer - Smart Comparison & Trend Detection
+"""Compare the two newest Forward Power Problem Report CSV files.
+
+The utility carries prior issue context into the newest report when the current
+Issue field is empty, then writes a merged report and a list of newly appearing
+sites. It reads and writes CSV files only; it does not connect to equipment.
+"""
+
+from datetime import datetime
+from pathlib import Path
+import re
+import sys
 
 import pandas as pd
-import os
-from datetime import datetime
 
-# --- Helper Functions ---
-def extract_date_from_filename(filename):
+REPORT_PREFIX = "Forward Power Problem Report"
+REPORT_DATE_PATTERN = re.compile(
+    r"Forward Power Problem Report\((?P<date>[A-Za-z]{3,9}\s+\d{1,2})\)\.csv$",
+    re.IGNORECASE,
+)
+EXPECTED_COLUMNS = ["Site", "FP", "Issue"]
+
+
+def extract_report_date(path: Path) -> datetime:
+    """Parse the month/day embedded in a supported report filename."""
+    match = REPORT_DATE_PATTERN.search(path.name)
+    if not match:
+        raise ValueError(f"Unsupported report filename: {path.name}")
+
+    date_text = match.group("date")
+    for date_format in ("%b %d", "%B %d"):
+        try:
+            return datetime.strptime(date_text, date_format)
+        except ValueError:
+            continue
+
+    raise ValueError(f"Could not parse report date from: {path.name}")
+
+
+def discover_reports(directory: Path) -> list[Path]:
+    """Return matching report files sorted newest first by filename date."""
+    candidates = [
+        path
+        for path in directory.glob("*.csv")
+        if path.name.lower().startswith(REPORT_PREFIX.lower())
+    ]
+
+    valid_reports = []
+    for path in candidates:
+        try:
+            report_date = extract_report_date(path)
+            valid_reports.append((report_date, path))
+        except ValueError as error:
+            print(f"Skipping {path.name}: {error}", file=sys.stderr)
+
+    valid_reports.sort(key=lambda item: item[0], reverse=True)
+    return [path for _, path in valid_reports]
+
+
+def load_report(path: Path) -> pd.DataFrame:
+    """Load and normalize the expected three-column report schema."""
+    frame = pd.read_csv(path)
+
+    if len(frame.columns) != len(EXPECTED_COLUMNS):
+        raise ValueError(
+            f"{path.name} has {len(frame.columns)} column(s); "
+            f"expected exactly {len(EXPECTED_COLUMNS)}."
+        )
+
+    frame.columns = EXPECTED_COLUMNS
+    frame["Site"] = frame["Site"].astype(str).str.strip()
+    return frame
+
+
+def compare_reports(newest: pd.DataFrame, previous: pd.DataFrame):
+    """Carry prior issue context forward and identify newly appearing sites."""
+    previous_issues = previous[["Site", "Issue"]].drop_duplicates(
+        subset=["Site"], keep="last"
+    )
+
+    merged = pd.merge(
+        newest,
+        previous_issues,
+        on="Site",
+        how="left",
+        suffixes=("", "_Previous"),
+        validate="many_to_one",
+    )
+
+    merged["Issue"] = merged["Issue"].combine_first(merged["Issue_Previous"])
+    merged.drop(columns=["Issue_Previous"], inplace=True)
+
+    new_sites = merged.loc[
+        ~merged["Site"].isin(previous["Site"]), ["Site", "FP", "Issue"]
+    ].copy()
+
+    return merged, new_sites
+
+
+def main() -> int:
+    working_directory = Path.cwd()
+    reports = discover_reports(working_directory)
+
+    if len(reports) < 2:
+        print(
+            "At least two valid Forward Power Problem Report CSV files are required.",
+            file=sys.stderr,
+        )
+        return 1
+
+    newest_path = reports[0]
+    previous_path = reports[1]
+    print(f"Comparing: {previous_path.name} -> {newest_path.name}")
+
     try:
-        # Example: "Forward Power Problem Report(May 20).csv"
-        date_str = filename.split("(")[1].replace(").csv", "").strip().replace(")", "")
-        return datetime.strptime(date_str, "%b %d")
-    except Exception as e:
-        print(f"Failed to parse date from {filename}: {e}")
-        return datetime.min
+        newest = load_report(newest_path)
+        previous = load_report(previous_path)
+        merged, new_sites = compare_reports(newest, previous)
+    except (OSError, ValueError, pd.errors.ParserError) as error:
+        print(f"Report analysis failed: {error}", file=sys.stderr)
+        return 1
 
-# --- Load and Sort Files by Date ---
-folder_path = "."  # Replace with actual path
-files = [f for f in os.listdir(folder_path) if f.endswith(".csv") and "Forward Power Problem Report" in f]
-sorted_files = sorted(files, key=extract_date_from_filename, reverse=True)
+    output_date = datetime.now().strftime("%Y-%m-%d")
+    merged_output = working_directory / f"merged_sites_{output_date}.csv"
+    new_sites_output = working_directory / f"new_sites_only_{output_date}.csv"
 
-if len(sorted_files) < 2:
-    raise Exception("Not enough data files for comparison.")
+    merged.to_csv(merged_output, index=False)
+    new_sites.to_csv(new_sites_output, index=False)
 
-newest_file = sorted_files[0]
-previous_file = sorted_files[1]
+    print(f"Merged report: {merged_output.name}")
+    print(f"New sites: {new_sites_output.name} ({len(new_sites)} row(s))")
+    return 0
 
-print(f"📂 Comparing: {previous_file} ➡️ {newest_file}")
 
-# --- Load Data ---
-df_new = pd.read_csv(os.path.join(folder_path, newest_file))
-df_old = pd.read_csv(os.path.join(folder_path, previous_file))
-
-# --- Standardize Columns ---
-df_new.columns = ['Site', 'FP', 'Issue']
-df_old.columns = ['Site', 'FP', 'Issue']
-df_new['Site'] = df_new['Site'].astype(str).str.strip()
-df_old['Site'] = df_old['Site'].astype(str).str.strip()
-
-# --- Merge Issues from Past ---
-merged_df = pd.merge(df_new, df_old[['Site', 'Issue']], on='Site', how='left', suffixes=('', '_Prev'))
-merged_df['Issue'] = merged_df['Issue'].combine_first(merged_df['Issue_Prev'])
-merged_df.drop(columns=['Issue_Prev'], inplace=True)
-
-# --- Identify Truly New Sites ---
-new_sites_df = merged_df[~merged_df['Site'].isin(df_old['Site'])][['Site', 'Issue']]
-
-# --- Save Outputs ---
-merged_output_path = f"merged_sites_{datetime.now().strftime('%Y-%m-%d')}.csv"
-new_sites_output_path = f"new_sites_only_{datetime.now().strftime('%Y-%m-%d')}.csv"
-
-merged_df.to_csv(merged_output_path, index=False)
-new_sites_df.to_csv(new_sites_output_path, index=False)
-
-print(f"✅ Merged with carried Issues: {merged_output_path}")
-print(f"🆕 New Sites: {new_sites_output_path}")
+if __name__ == "__main__":
+    sys.exit(main())
