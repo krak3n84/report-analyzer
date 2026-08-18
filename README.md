@@ -1,67 +1,85 @@
-# automated-scripts
-Forward Power Report Analyzer
-Report Merge Utility
+# Forward Power Report Analyzer
 
-Overview
-This Python script enables users to compare two report files, identify duplicate or repeated entries, and efficiently merge data by moving input values from one sheet to another. The goal is to streamline the process of combining reports, ensuring that redundant information is managed intelligently and only unique, relevant data is retained.
+A small Python automation project for comparing sequential **Forward Power Problem Report** CSV files in an operations workflow.
 
-Features
-Compare reports to detect overlapping or repeated records.
+The script reduces repetitive report review by carrying known issue context forward, identifying sites that are new in the latest report, and producing clean CSV outputs for follow-up.
 
-Identify and highlight duplicate entries across both reports.
+## What It Does
 
-Merge data by moving or copying input values from one sheet to another.
+1. Scans the working directory for CSV files whose names contain `Forward Power Problem Report`.
+2. Extracts the report date from the filename, such as `Forward Power Problem Report(May 20).csv`.
+3. Selects the two newest matching reports.
+4. Normalizes the expected columns as `Site`, `FP`, and `Issue`.
+5. Carries the previous report's `Issue` value forward when the current report does not already contain one.
+6. Identifies sites that appear in the newest report but not in the previous report.
+7. Writes two timestamped CSV files:
+   - `merged_sites_YYYY-MM-DD.csv`
+   - `new_sites_only_YYYY-MM-DD.csv`
 
-Automatically filter out or flag repeated information for a clean, concise final report.
+## Why I Built It
 
-User-friendly setup and clear output for easy workflow integration.
+Operational reports often contain a mix of continuing issues and newly appearing conditions. Re-checking the same rows and manually transferring context creates unnecessary operator work and increases the chance that a new item gets overlooked.
 
-How It Works
-Input: Provide two report files (Excel or CSV format).
+This project turns that comparison into a repeatable process so the operator can focus on investigation and follow-up rather than manual reconciliation.
 
-Processing: The script compares both reports, identifies matching rows or entries, and determines which data should be merged.
+## Requirements
 
-Merging: Input values from one sheet are moved or copied to the other based on overlap and redundancy rules.
+- Python 3.x
+- pandas
 
-Output: A new, merged report file with combined and de-duplicated data.
+Install the dependency:
 
-Usage
-Place your two report files in the project directory.
+```bash
+python -m pip install -r requirements.txt
+```
 
-Update the script’s configuration (if needed) to specify file names and columns for comparison.
+## Usage
 
-Run the script:
+Place at least two matching report files in the project directory, then run:
 
-bash
-python merge_reports.py
-Review the output file for your merged, cleaned report.
+```bash
+python "FP Report Analyzer.py"
+```
 
-Requirements
-Python 3.x
+Example input filenames:
 
-pandas
+```text
+Forward Power Problem Report(May 19).csv
+Forward Power Problem Report(May 20).csv
+```
 
-openpyxl (for Excel files)
+Example console output:
 
-Install dependencies with:
+```text
+Comparing: Forward Power Problem Report(May 19).csv -> Forward Power Problem Report(May 20).csv
+Merged with carried Issues: merged_sites_2026-08-17.csv
+New Sites: new_sites_only_2026-08-17.csv
+```
 
-bash
-pip install pandas openpyxl
-Example
-If you have two sales reports from different departments, this script will:
+## Expected Input
 
-Compare both reports for repeated transactions.
+The current script expects each report to contain three columns representing:
 
-Move unique sales data from one sheet to another.
+| Column | Purpose |
+|---|---|
+| `Site` | Site or location identifier |
+| `FP` | Forward-power value or report field |
+| `Issue` | Operator notes or issue context |
 
-Output a single, consolidated report with all unique sales entries.
+The project intentionally operates on report files only. It does not connect to or modify network or broadcast equipment.
 
-Customization
-Adjust the columns used for comparison by editing the script’s configuration section.
+## Operational Value
 
-Modify merge logic as needed for your specific data structure or business rules.
+- Reduces repetitive comparison work
+- Preserves known issue context between reports
+- Surfaces newly appearing sites quickly
+- Creates consistent output for review or downstream processing
+- Provides a simple example of using Python to improve an operations workflow
 
-License
-This project is open source and available for personal or organizational use. Modify and adapt as needed for your workflow.
+## Scope
 
-For questions or suggestions, please open an issue or submit a pull request.
+This is a focused utility rather than a full monitoring platform. Future improvements could include schema validation, configurable input columns, logging, automated tests, and additional trend reporting.
+
+## License
+
+Use and adapt this project as appropriate for your own workflow and data-handling requirements.
