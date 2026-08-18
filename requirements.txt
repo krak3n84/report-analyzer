@@ -1,3 +1,1 @@
-pandas
-openpyxl
-Python 3.x
+pandas>=2.0,<3.0
